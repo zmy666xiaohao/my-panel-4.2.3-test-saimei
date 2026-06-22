@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: "latest"
       - run: npm install -g javascript-obfuscator
-      - run: wget -O origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/build/unobfuscated-worker.js
+      - run: wget -O origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/dist/worker.js
       - run: |
           javascript-obfuscator origin.js --output _worker.js \
           --compact true \
