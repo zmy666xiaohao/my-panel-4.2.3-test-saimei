@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "37 2 * * *"  # 每天凌晨2:37自动更新（随机分钟，避开整点）
+    - cron: "36 2 * * *"  # 每天凌晨2:37自动更新（随机分钟，避开整点）
 
 permissions:
   contents: write
