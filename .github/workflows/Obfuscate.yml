@@ -1,11 +1,11 @@
-name: Build Obfuscate BPB Panel
+name: Build Obfuscate BPB Panel (Anti-1101)
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: "0 1 * * *"  # 每天凌晨1点自动更新
+    - cron: "37 2 * * *"  # 每天凌晨2:37自动更新（随机分钟，避开整点）
 
 permissions:
   contents: write
@@ -14,27 +14,121 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "latest"
-      - run: npm install -g javascript-obfuscator
-      - run: wget -O origin.js https://raw.githubusercontent.com/bia-pain-bache/BPB-Worker-Panel/main/dist/worker.js
-      - run: |
+          node-version: "20"
+
+      - name: Install obfuscator
+        run: npm install -g javascript-obfuscator
+
+      # 第1步：从官方最新 release 下载源码
+      - name: Download latest BPB worker
+        run: |
+          # 获取最新 release 的 worker.js 下载地址
+          DOWNLOAD_URL=$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest \
+            | grep "browser_download_url.*worker\.js" \
+            | cut -d '"' -f 4 \
+            | head -1)
+          
+          # 如果没找到 worker.js，试试 worker.zip
+          if [ -z "$DOWNLOAD_URL" ]; then
+            ZIP_URL=$(curl -s https://api.github.com/repos/bia-pain-bache/BPB-Worker-Panel/releases/latest \
+              | grep "browser_download_url.*worker\.zip" \
+              | cut -d '"' -f 4 \
+              | head -1)
+            wget -O worker.zip "$ZIP_URL"
+            unzip -o worker.zip
+            # 解压后找 worker.js 或 _worker.js
+            if [ -f "_worker.js" ]; then
+              mv _worker.js origin.js
+            elif [ -f "worker.js" ]; then
+              mv worker.js origin.js
+            fi
+          else
+            wget -O origin.js "$DOWNLOAD_URL"
+          fi
+          
+          echo "下载完成，文件大小: $(wc -c < origin.js) bytes"
+
+      # 第2步：预处理 - 替换特征字符串（关键！防检测）
+      - name: Pre-process - remove signatures
+        run: |
+          # 备份原始文件
+          cp origin.js origin_backup.js
+          
+          # 替换一些可能被检测的特征字符串
+          sed -i 's/BPB Panel/My Panel/g' origin.js
+          sed -i 's/bia-pain-bache/mydomain/g' origin.js
+          sed -i 's/BPB-Worker-Panel/my-proxy-panel/g' origin.js
+          
+          # 随机插入一些无害的注释和变量（增加熵）
+          RANDOM_VAR="my_$(date +%s | md5sum | head -c 8)"
+          sed -i "1i // ${RANDOM_VAR} - build $(date)" origin.js
+          
+          echo "预处理完成"
+
+      # 第3步：深度混淆（核心）
+      - name: Deep obfuscation
+        run: |
           javascript-obfuscator origin.js --output _worker.js \
-          --compact true \
-          --control-flow-flattening true \
-          --control-flow-flattening-threshold 1 \
-          --dead-code-injection true \
-          --dead-code-injection-threshold 1 \
-          --identifier-names-generator hexadecimal \
-          --rename-globals true \
-          --string-array true \
-          --string-array-encoding 'rc4' \
-          --string-array-threshold 1 \
-          --transform-object-keys true \
-          --unicode-escape-sequence true
-      - uses: stefanzweifel/git-auto-commit-action@v5
+            --compact true \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 0.8 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 0.5 \
+            --identifier-names-generator mangled-shuffled \
+            --rename-globals true \
+            --string-array true \
+            --string-array-encoding 'rc4' \
+            --string-array-threshold 1 \
+            --string-array-index-shift true \
+            --string-array-indexes-type 'hexadecimal-numeric-string' \
+            --transform-object-keys true \
+            --unicode-escape-sequence true \
+            --split-strings true \
+            --split-strings-chunk-length 5 \
+            --numbers-to-expressions true \
+            --simplify true \
+            --self-defending false \
+            --debug-protection false
+          
+          echo "混淆完成，文件大小: $(wc -c < _worker.js) bytes"
+
+      # 第4步：二次混淆（可选，更稳但更慢）
+      - name: Second obfuscation pass (optional)
+        run: |
+          # 二次混淆，进一步打乱特征
+          cp _worker.js temp_obf.js
+          javascript-obfuscator temp_obf.js --output _worker.js \
+            --compact true \
+            --identifier-names-generator hexadecimal \
+            --string-array true \
+            --string-array-encoding 'base64' \
+            --transform-object-keys true
+          
+          rm temp_obf.js
+          echo "二次混淆完成"
+
+      # 第5步：后处理 - 随机化文件特征
+      - name: Post-process - randomize
+        run: |
+          # 在文件末尾添加随机长度的无害注释
+          RANDOM_LEN=$((RANDOM % 100 + 50))
+          RANDOM_STR=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c $RANDOM_LEN)
+          echo -e "\n// footer_${RANDOM_STR}" >> _worker.js
+          
+          # 显示最终文件信息
+          echo "最终文件大小: $(wc -c < _worker.js) bytes"
+          echo "MD5: $(md5sum _worker.js | cut -d' ' -f1)"
+
+      # 第6步：提交到仓库
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
           branch: main
-          commit_message: 'update latest bpb panel'
+          commit_message: "🔄 update panel - $(date +%Y%m%d)"
+          file_pattern: "_worker.js origin.js"
